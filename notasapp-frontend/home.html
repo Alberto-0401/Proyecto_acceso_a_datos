@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mis Notas - NotasApp</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div class="navbar">
+        <div class="navbar-content">
+            <h2>NotasApp</h2>
+            <div class="navbar-right">
+                <span id="welcomeMessage">Bienvenido</span>
+                <button class="btn btn-secondary" id="logoutBtn">Cerrar Sesión</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container main-content">
+        <div class="notes-container">
+            <div class="create-note-section">
+                <h2>Crear Nueva Nota</h2>
+                <form id="createNoteForm">
+                    <div class="form-group">
+                        <label for="titulo">Título</label>
+                        <input type="text" id="titulo" name="titulo" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="contenido">Contenido</label>
+                        <textarea id="contenido" name="contenido" rows="4" required></textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Crear Nota</button>
+                </form>
+            </div>
+
+            <div class="notes-list-section">
+                <h2>Mis Notas</h2>
+                <div id="notesList">
+                    <p class="loading">Cargando notas...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para editar nota -->
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Editar Nota</h2>
+            <form id="editNoteForm">
+                <input type="hidden" id="editNotaId">
+                <div class="form-group">
+                    <label for="editTitulo">Título</label>
+                    <input type="text" id="editTitulo" name="editTitulo" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="editContenido">Contenido</label>
+                    <textarea id="editContenido" name="editContenido" rows="4" required></textarea>
+                </div>
+
+                <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+    <script>
+        // Verificar autenticación
+        if (!getToken()) {
+            window.location.href = 'login.html';
+        }
+
+        let currentUser = null;
+
+        // Cargar perfil de usuario
+        async function loadUserProfile() {
+            try {
+                const response = await fetchWithAuth(`${API_URL}/auth/perfil`);
+                const data = await response.json();
+
+                if (data.success) {
+                    currentUser = data.data;
+                    document.getElementById('welcomeMessage').textContent =
+                        `Bienvenido, ${currentUser.username}`;
+                }
+            } catch (error) {
+                console.error('Error al cargar perfil:', error);
+            }
+        }
+
+        // Cargar notas
+        async function loadNotes() {
+            try {
+                const response = await fetchWithAuth(`${API_URL}/notas`);
+                const data = await response.json();
+
+                const notesList = document.getElementById('notesList');
+
+                if (data.success && data.data.length > 0) {
+                    notesList.innerHTML = data.data.map(nota => `
+                        <div class="note-card">
+                            <h3>${escapeHtml(nota.titulo)}</h3>
+                            <p>${escapeHtml(nota.contenido)}</p>
+                            <div class="note-footer">
+                                <small>${formatDate(nota.fecha)}</small>
+                                <div class="note-actions">
+                                    <button class="btn btn-edit" onclick="editNote('${nota.id}', '${escapeHtml(nota.titulo)}', '${escapeHtml(nota.contenido)}')">Editar</button>
+                                    <button class="btn btn-delete" onclick="deleteNote('${nota.id}')">Eliminar</button>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    notesList.innerHTML = '<p class="no-notes">No tienes notas. ¡Crea tu primera nota!</p>';
+                }
+            } catch (error) {
+                console.error('Error al cargar notas:', error);
+                document.getElementById('notesList').innerHTML =
+                    '<p class="error">Error al cargar las notas</p>';
+            }
+        }
+
+        // Crear nota
+        document.getElementById('createNoteForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const titulo = document.getElementById('titulo').value.trim();
+            const contenido = document.getElementById('contenido').value.trim();
+
+            if (!titulo || !contenido) {
+                alert('Por favor, completa todos los campos');
+                return;
+            }
+
+            try {
+                const response = await fetchWithAuth(`${API_URL}/notas`, {
+                    method: 'POST',
+                    body: JSON.stringify({ titulo, contenido })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    document.getElementById('createNoteForm').reset();
+                    loadNotes();
+                } else {
+                    alert(data.message);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error al crear la nota');
+            }
+        });
+
+        // Editar nota
+        const modal = document.getElementById('editModal');
+        const closeModal = document.getElementsByClassName('close')[0];
+
+        closeModal.onclick = function() {
+            modal.style.display = 'none';
+        }
+
+        window.onclick = function(event) {
+            if (event.target == modal) {
+                modal.style.display = 'none';
+            }
+        }
+
+        window.editNote = function(id, titulo, contenido) {
+            document.getElementById('editNotaId').value = id;
+            document.getElementById('editTitulo').value = titulo;
+            document.getElementById('editContenido').value = contenido;
+            modal.style.display = 'block';
+        }
+
+        document.getElementById('editNoteForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const id = document.getElementById('editNotaId').value;
+            const titulo = document.getElementById('editTitulo').value.trim();
+            const contenido = document.getElementById('editContenido').value.trim();
+
+            try {
+                const response = await fetchWithAuth(`${API_URL}/notas/${id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ titulo, contenido })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    modal.style.display = 'none';
+                    loadNotes();
+                } else {
+                    alert(data.message);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error al actualizar la nota');
+            }
+        });
+
+        // Eliminar nota
+        window.deleteNote = async function(id) {
+            if (!confirm('¿Estás seguro de que deseas eliminar esta nota?')) {
+                return;
+            }
+
+            try {
+                const response = await fetchWithAuth(`${API_URL}/notas/${id}`, {
+                    method: 'DELETE'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    loadNotes();
+                } else {
+                    alert(data.message);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error al eliminar la nota');
+            }
+        }
+
+        // Cerrar sesión
+        document.getElementById('logoutBtn').addEventListener('click', () => {
+            logout();
+        });
+
+        // Funciones auxiliares
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleDateString('es-ES', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Inicializar
+        loadUserProfile();
+        loadNotes();
+    </script>
+</body>
+</html>
